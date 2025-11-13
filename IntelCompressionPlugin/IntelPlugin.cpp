@@ -19,57 +19,7 @@
 #include <memory>
 #include <sstream>
 #include <windows.h>
-#include <shlobj.h>
-#include <cstdarg>
-#include <cstdio>
-
 using namespace DirectX;
-
-// Debug logging function - using Windows API only for reliability
-void DebugLog(const char* format, ...)
-{
-	char buffer[1024];
-	va_list args;
-	va_start(args, format);
-	vsnprintf(buffer, sizeof(buffer), format, args);
-	va_end(args);
-
-	// Write to OutputDebugString (viewable with DebugView)
-	OutputDebugStringA("IntelTextureWorks: ");
-	OutputDebugStringA(buffer);
-	OutputDebugStringA("\n");
-
-	// Write to log file on desktop using Windows API
-	static HANDLE hLogFile = INVALID_HANDLE_VALUE;
-	static bool logFileOpened = false;
-	if (!logFileOpened)
-	{
-		char logPath[MAX_PATH];
-		// Get desktop path
-		if (SHGetFolderPathA(NULL, CSIDL_DESKTOP, NULL, SHGFP_TYPE_CURRENT, logPath) == S_OK)
-		{
-			strcat_s(logPath, "\\IntelTextureWorks_debug.log");
-			hLogFile = CreateFileA(logPath, GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-			if (hLogFile != INVALID_HANDLE_VALUE)
-			{
-				logFileOpened = true;
-				SetFilePointer(hLogFile, 0, NULL, FILE_END);
-				const char* header = "=== IntelTextureWorks Debug Log Started ===\r\n";
-				DWORD written = 0;
-				WriteFile(hLogFile, header, (DWORD)strlen(header), &written, NULL);
-			}
-		}
-	}
-	if (hLogFile != INVALID_HANDLE_VALUE)
-	{
-		DWORD written = 0;
-		WriteFile(hLogFile, buffer, (DWORD)strlen(buffer), &written, NULL);
-		const char* newline = "\r\n";
-		WriteFile(hLogFile, newline, 2, &written, NULL);
-		FlushFileBuffers(hLogFile);
-	}
-}
-
 	// this global pointer is necessary to use code from PIUSuites.cpp
 SPBasicSuite * sSPBasic = NULL;
 
@@ -242,8 +192,21 @@ bool IntelPlugin::CompressToScratchImage(ScratchImage **scrImageScratch_, Scratc
 	//============================================================================================
 	//============================================================================================
 	//Compress image, section
+	//For TEX files, use DirectXTex compression for BC3/DXT5 to ensure compatibility
 	//ISPC is used for BC1,3,6,7. BC4,5 is done using DirectXTex Lib in one of the previous sections
-	if (ps.data->encoding_g != DXGI_FORMAT_BC4_UNORM && ps.data->encoding_g != DXGI_FORMAT_BC5_UNORM && ps.data->encoding_g !=DXGI_FORMAT_R8G8B8A8_UNORM)
+	if (ps.data->encoding_g == DXGI_FORMAT_BC3_UNORM || ps.data->encoding_g == DXGI_FORMAT_BC3_UNORM_SRGB)
+	{
+		// Use DirectXTex for BC3/DXT5 compression for TEX files (better compatibility)
+		HRESULT hr = Compress((*scrUncompressedImageScratch_)->GetImages(), (*scrUncompressedImageScratch_)->GetImageCount(), 
+			                  (*scrUncompressedImageScratch_)->GetMetadata(), ps.data->encoding_g, 
+			                  TEX_COMPRESS_DEFAULT, 0.5f, **scrImageScratch_);
+		if (hr != S_OK)
+		{
+			UserError("Could not compress to DXT5/BC3");
+			return false;
+		}
+	}
+	else if (ps.data->encoding_g != DXGI_FORMAT_BC4_UNORM && ps.data->encoding_g != DXGI_FORMAT_BC5_UNORM && ps.data->encoding_g !=DXGI_FORMAT_R8G8B8A8_UNORM)
 	{
 		//How many mip levels are generated? If no mip map override this is 1 so that only one image is encoded
 		size_t mipLevels = (*scrUncompressedImageScratch_)->GetMetadata().mipLevels;
@@ -2124,6 +2087,28 @@ void IntelPlugin::DoWriteDDS()
 	if (GetResult() != noErr)
 		return;
 
+	// Validate dimensions for DXT compression (must be divisible by 4)
+	int imageWidth = ps.formatRecord->imageSize.h;
+	int imageHeight = ps.formatRecord->imageSize.v;
+	
+	if (imageWidth % 4 != 0 || imageHeight % 4 != 0)
+	{
+		char errorMsg[512];
+		int suggestedWidth = ((imageWidth + 3) / 4) * 4;
+		int suggestedHeight = ((imageHeight + 3) / 4) * 4;
+		
+		sprintf_s(errorMsg, 
+			"Image dimensions must be divisible by 4 for TEX format.\n\n"
+			"Current size: %dx%d\n"
+			"Suggested size: %dx%d\n\n"
+			"Please resize your image to dimensions divisible by 4.\n"
+			"Examples: 1024x1024, 2048x2048, 512x256, 4096x4096, etc.",
+			imageWidth, imageHeight, suggestedWidth, suggestedHeight);
+		
+		UserError(errorMsg);
+		return;
+	}
+
 	bool DoMipMaps = ps.data->MipMapTypeIndex == MipmapEnum::AUTOGEN || ps.data->MipMapTypeIndex == MipmapEnum::FROM_LAYERS;
 
 	//============================================================================================
@@ -2231,19 +2216,30 @@ void IntelPlugin::DoWriteDDS()
 		return;
 
 	// Save as TEX format instead of DDS
-	DebugLog("========================================");
-	DebugLog("EXPORT: Starting TEX file export");
 	
 	const Image* img = scrImageScratch->GetImages();
 	const TexMetadata& metadata = scrImageScratch->GetMetadata();
 	
-	DebugLog("EXPORT: Image properties:");
-	DebugLog("  - Width: %d", metadata.width);
-	DebugLog("EXPORT: Image properties:");
-	DebugLog("  - Width: %d", metadata.width);
-	DebugLog("  - Height: %d", metadata.height);
-	DebugLog("  - Format: %d (BC3_UNORM=DXT5)", metadata.format);
-	DebugLog("  - Mip levels: %d", metadata.mipLevels);
+	// Verify DXT5/BC3 compression was applied
+	if (metadata.format != DXGI_FORMAT_BC3_UNORM && metadata.format != DXGI_FORMAT_BC3_UNORM_SRGB)
+	{
+		UserError("Compression failed - image is not in DXT5 format");
+		return;
+	}
+	
+	// Calculate expected DXT5 data size
+	size_t blockWidth = (metadata.width + 3) / 4;
+	size_t blockHeight = (metadata.height + 3) / 4;
+	size_t expectedSize = blockWidth * blockHeight * 16;  // DXT5 = 16 bytes per 4x4 block
+	
+	// Verify the data size matches expected DXT5 size
+	if (img->slicePitch != expectedSize)
+	{
+		char errorMsg[256];
+		sprintf_s(errorMsg, "Data size mismatch: expected %zu bytes but got %zu bytes", expectedSize, img->slicePitch);
+		UserError(errorMsg);
+		return;
+	}
 	
 	// Create TEX header
 	TEX_HEADER_EXPORT texHeader;
@@ -2259,46 +2255,29 @@ void IntelPlugin::DoWriteDDS()
 	texHeader.unk2 = 0;
 	texHeader.has_mipmaps = false;  // No mipmaps for now
 	
-	DebugLog("EXPORT: TEX header created");
-	DebugLog("  - Magic: TEX\\0");
-	DebugLog("  - Size: %dx%d", texHeader.image_width, texHeader.image_height);
-	DebugLog("  - Format: DXT5 (0xC)");
-	DebugLog("  - Mipmaps: No");
 	
 	// Write TEX header
 	DWORD written = 0;
 	if (!WriteFile(reinterpret_cast<HANDLE>(ps.formatRecord->dataFork), &texHeader, sizeof(TEX_HEADER_EXPORT), &written, NULL))
 	{
-		DebugLog("EXPORT: ERROR - Failed to write TEX header");
 		SetResult(writErr);
 	}
 	else
 	{
-		DebugLog("EXPORT: Successfully wrote TEX header (%d bytes)", written);
 		
 		// Write compressed pixel data
 		size_t dataSize = img->slicePitch;
-		DebugLog("EXPORT: Writing compressed pixel data (%d bytes)", dataSize);
 		
 		if (!WriteFile(reinterpret_cast<HANDLE>(ps.formatRecord->dataFork), img->pixels, (DWORD)dataSize, &written, NULL))
 		{
-			DebugLog("EXPORT: ERROR - Failed to write pixel data");
 			SetResult(writErr);
 		}
 		else if (written < dataSize)
 		{
-			DebugLog("EXPORT: ERROR - Disk full, wrote %d/%d bytes", written, dataSize);
 			SetResult(dskFulErr);
-		}
-		else
-		{
-			DebugLog("EXPORT: SUCCESS! Wrote %d bytes of pixel data", written);
-			DebugLog("EXPORT: Total file size: %d bytes (header) + %d bytes (data) = %d bytes", 
-				sizeof(TEX_HEADER_EXPORT), written, sizeof(TEX_HEADER_EXPORT) + written);
 		}
 	}
 	
-	DebugLog("========================================");
 
 
 	// Cleanup
@@ -2518,7 +2497,6 @@ OSErr IntelPlugin::WriteScriptParamsForRead ()
 
 void IntelPlugin::DoFilterFile (void)
 {
-	DebugLog("DoFilterFile: Called - checking if file format is supported");
 	
 	// Try to peek at file to determine format
 	OSErr err = PSSDKSetFPos(ps.formatRecord->dataFork, fsFromStart, 0);
@@ -2526,30 +2504,19 @@ void IntelPlugin::DoFilterFile (void)
 		char magic[4] = {0};
 		int32 readCount = 4;
 		err = PSSDKRead(ps.formatRecord->dataFork, &readCount, magic);
-		if (err == noErr && readCount == 4) {
-			DebugLog("DoFilterFile: File magic bytes: 0x%02X%02X%02X%02X ('%c%c%c%c')", 
-				magic[0], magic[1], magic[2], magic[3],
-				(magic[0] >= 32 && magic[0] < 127) ? magic[0] : '.',
-				(magic[1] >= 32 && magic[1] < 127) ? magic[1] : '.',
-				(magic[2] >= 32 && magic[2] < 127) ? magic[2] : '.',
-				(magic[3] >= 32 && magic[3] < 127) ? magic[3] : '.');
+	if (err == noErr && readCount == 4) {
+		uint32_t signature = *reinterpret_cast<uint32_t*>(magic);
+		bool isTex = (signature == 0x00584554) || (memcmp(magic, "TEX", 3) == 0);
+		bool isDds = (memcmp(magic, "DDS ", 4) == 0);
 			
-			uint32_t signature = *reinterpret_cast<uint32_t*>(magic);
-			bool isTex = (signature == 0x00584554) || (memcmp(magic, "TEX", 3) == 0);
-			bool isDds = (memcmp(magic, "DDS ", 4) == 0);
-			
-			DebugLog("DoFilterFile: isTex=%d, isDds=%d, signature=0x%08X", isTex ? 1 : 0, isDds ? 1 : 0, signature);
 		} else {
-			DebugLog("DoFilterFile: Failed to read magic bytes, err=%d, readCount=%d", err, readCount);
 		}
 	} else {
-		DebugLog("DoFilterFile: Failed to rewind file, err=%d", err);
 	}
 	
 	// File can be tested for validity here
 	//SetResult(formatCannotRead);
 	SetResult(noErr);
-	DebugLog("DoFilterFile: Returning noErr (file format supported)");
 }
 
 #include "s3tc.h"
@@ -2621,21 +2588,16 @@ void IntelPlugin::DoReadStart()
 	//Read any descriptor values for scripting support and return if we are in batch mode.
 	ps.data->queryForParameters = ReadScriptParamsForRead();
 
-	DebugLog("========================================");
-	DebugLog("DoReadStart: Starting file read");
-	DebugLog("DoReadStart: File path/name available: %s", ps.formatRecord->dataFork ? "Yes" : "No");
 	
 	//Rewind to start of file
 	OSErr err= PSSDKSetFPos (ps.formatRecord->dataFork, fsFromStart, 0);
 	if (err != noErr) 
 	{
-		DebugLog("DoReadStart: ERROR - Failed to rewind file, error: %d", err);
 		errorMessage(LINE_STRING, "Err");
 		SetResult(err);
 		showNormalCursor();
 		return;
 	}
-	DebugLog("DoReadStart: Successfully rewound to start of file");
 
 	// Try to read TEX header first
 	int32 texHeaderSize = sizeof(TEX_HEADER);
@@ -2645,7 +2607,6 @@ void IntelPlugin::DoReadStart()
 	err = PSSDKRead(ps.formatRecord->dataFork, &texHeaderSize, header.get());
 	if (err != noErr || texHeaderSize != sizeof(TEX_HEADER))
 	{
-		DebugLog("DoReadStart: Failed to read TEX header or incomplete read, error: %d, bytes read: %d", err, texHeaderSize);
 		// Not a TEX file, will try DDS below
 		header.reset();
 	}
@@ -2657,16 +2618,13 @@ void IntelPlugin::DoReadStart()
 		bool isTex = (texSignature == 0x00584554) || (memcmp(header->magic, "TEX", 3) == 0);
 		
 		if (!isTex) {
-			DebugLog("DoReadStart: Not a TEX file, will try DDS");
 			header.reset();
 		}
 	}
 	
 	// Rewind to start for either TEX processing or DDS fallback
-	DebugLog("DoReadStart: Rewinding file for format processing");
 	err = PSSDKSetFPos(ps.formatRecord->dataFork, fsFromStart, 0);
 	if (err != noErr) {
-		DebugLog("DoReadStart: ERROR - Failed to rewind file, error: %d", err);
 		SetResult(err);
 		showNormalCursor();
 		return;
@@ -2677,36 +2635,22 @@ void IntelPlugin::DoReadStart()
 	uint32_t texSignature = 0;
 	
 	if (header != nullptr && header->magic[0] != 0) {
-		DebugLog("DoReadStart: Re-reading TEX header from start of file");
 		// Re-read header now that we're at the start
 		texHeaderSize = sizeof(TEX_HEADER);
 		err = PSSDKRead(ps.formatRecord->dataFork, &texHeaderSize, header.get());
 		if (err != noErr || texHeaderSize != sizeof(TEX_HEADER)) {
-			DebugLog("DoReadStart: ERROR - Failed to re-read TEX header, error: %d, bytes read: %d", err, texHeaderSize);
 			SetResult(err);
 			showNormalCursor();
 			return;
 		}
 		
-		// Verify it's actually TEX
-		texSignature = *reinterpret_cast<uint32_t*>(header->magic);
-		isTex = (texSignature == 0x00584554) || (memcmp(header->magic, "TEX", 3) == 0);
-		
-		DebugLog("DoReadStart: TEX header verification - magic: 0x%02X%02X%02X%02X, signature: 0x%08X, isTex: %d", 
-			header->magic[0], header->magic[1], header->magic[2], header->magic[3], texSignature, isTex ? 1 : 0);
-	} else {
-		DebugLog("DoReadStart: No valid TEX header found, will process as DDS");
-	}
+	// Verify it's actually TEX
+	texSignature = *reinterpret_cast<uint32_t*>(header->magic);
+	isTex = (texSignature == 0x00584554) || (memcmp(header->magic, "TEX", 3) == 0);
+} else {
+}
 	
 	if (isTex) {
-		DebugLog("========================================");
-		DebugLog("DoReadStart: PROCESSING TEX FILE");
-		DebugLog("DoReadStart: TEX file properties:");
-		DebugLog("  - Width: %d", header->image_width);
-		DebugLog("  - Height: %d", header->image_height);
-		DebugLog("  - Format: %d (0xA=DXT1, 0xC=DXT5, 0x14=BGRA8)", header->tex_format);
-		DebugLog("  - Has Mipmaps: %d", header->has_mipmaps ? 1 : 0);
-		DebugLog("  - Unk1: %d, Unk2: %d", header->unk1, header->unk2);
 		texLoadInfo.isLoadingTex = true;
 
 		UINT width = header->image_width;
@@ -2719,23 +2663,16 @@ void IntelPlugin::DoReadStart()
 		uint32 blockHeight = (header->image_height + 3) / 4;
 		int32 readCount = blockWidth * blockHeight * blockSize;
 
-		DebugLog("DoReadStart: TEX pixel data calculation:");
-		DebugLog("  - Block size: %d bytes", blockSize);
-		DebugLog("  - Block width: %d, Block height: %d", blockWidth, blockHeight);
-		DebugLog("  - Total pixel data size: %d bytes", readCount);
 
 		auto pixelData = std::make_unique<uint8[]>(readCount);
 
-		DebugLog("DoReadStart: Setting file position to after header (offset: %d)", sizeof(TEX_HEADER));
 		err = PSSDKSetFPos(ps.formatRecord->dataFork, fsFromStart, sizeof(TEX_HEADER));
 		if (err != noErr) {
-			DebugLog("DoReadStart: ERROR - Failed to set file position, error: %d", err);
 			errorMessage("Failed to set file position", "Err");
 			SetResult(err);
 			showNormalCursor();
 			return;
 		}
-		DebugLog("DoReadStart: File position set successfully");
 
 		if (header->has_mipmaps) {
 			unsigned int mipMapCount = get_num_mipmaps(header->image_width, header->image_height);
@@ -2762,22 +2699,17 @@ void IntelPlugin::DoReadStart()
 		}
 
 		//ReadIn PixelData
-		DebugLog("DoReadStart: Reading pixel data - requesting %d bytes", readCount);
 		int32 requestedBytes = readCount;
 		err = PSSDKRead(ps.formatRecord->dataFork, &readCount, pixelData.get());
-		DebugLog("DoReadStart: Pixel data read result - err=%d, requested=%d, actual=%d", err, requestedBytes, readCount);
 		if (err != noErr)
 		{
-			DebugLog("DoReadStart: ERROR - Failed to read pixel data, error: %d", err);
 			errorMessage(LINE_STRING, "Err");
 			SetResult(err);
 			showNormalCursor();
 			return;
 		}
 		if (readCount != requestedBytes) {
-			DebugLog("DoReadStart: WARNING - Read incomplete pixel data: requested %d, got %d", requestedBytes, readCount);
 		}
-		DebugLog("DoReadStart: Successfully read %d bytes of pixel data", readCount);
 
 		//Setup formatRecord for loading
 
@@ -2785,19 +2717,8 @@ void IntelPlugin::DoReadStart()
 		bool compressedImageHasMipMaps = header->has_mipmaps;
 		bool loadDDSMipMaps = ps.data->mipmapBatchAllowed;
 		
-		/* 
-		Slightly modified dialog from the original, does not show the mipmap option
-		Its for the alpha be an channel instead of part of the layer itself
-		*/
-		if (compressedImageHasAlpha)
-		{
-			if (ps.data->queryForParameters)
-			{
-				unsigned8 loadDialogResult = ShowLoadDialog(compressedImageHasAlpha, false, GetActiveWindow());
-				bool separateAlphaChannel = (loadDialogResult & LoadInfoEnum::USE_SEPARATEALPHA) ? true : false;
-				ps.data->alphaBatchSeperate = separateAlphaChannel;
-			}
-		}
+		// For TEX files, always load transparency directly into the layer (no dialog)
+		ps.data->alphaBatchSeperate = false; // false = use layer transparency, true = separate alpha channel
 		
 		ps.formatRecord->imageRsrcData = NULL;
 		ps.formatRecord->imageRsrcSize = 0;
@@ -3044,6 +2965,7 @@ void IntelPlugin::DoReadContinue()
 	if (texLoadInfo.isLoadingTex) {
 		texLoadInfo.currentLayer++;
 
+
 		const UINT blockSize = texLoadInfo.header->tex_format == tex_format_dxt5 ? 16 : 8;
 		const UINT blockWidth = (texLoadInfo.header->image_width + 3) / 4;
 		const UINT blockHeight = (texLoadInfo.header->image_height + 3) / 4;
@@ -3072,32 +2994,13 @@ void IntelPlugin::DoReadContinue()
 			BlockDecompressImageDXT1(texLoadInfo.header->image_width, texLoadInfo.header->image_height, texLoadInfo.pixelData.get(), imageData.get());
 		} // No need for decompress rgba8
 
-		auto finalImage = std::make_unique<unsigned long[]>(stride * texLoadInfo.header->image_height);
-		if (!finalImage)
-		{
-			errorMessage(LINE_STRING, "Err");
-			SetResult(memFullErr);
-			return;
-		}
 
-		// RGBA -> ARGB
-		for (size_t i = 0; i < texLoadInfo.header->image_width * texLoadInfo.header->image_height; ++i)
-		{
-			unsigned long rgba = imageData[i];
-			unsigned char r = (rgba >> 24) & 0xFF;
-			unsigned char g = (rgba >> 16) & 0xFF;
-			unsigned char b = (rgba >> 8) & 0xFF;
-			unsigned char a = rgba & 0xFF;
-
-			finalImage[i] = (
-				(unsigned long)a << 24) |
-				((unsigned long)b << 16) |
-				((unsigned long)g << 8) |
-				((unsigned long)r);
-		}
-
-		imageData = std::move(finalImage);
-		unsigned int bufferSize = stride * texLoadInfo.header->image_height;
+		// Convert from packed RGBA (big-endian 32-bit) to byte array RGBA format for Photoshop
+		// PackRGBA creates: ((r << 24) | (g << 16) | (b << 8) | a)
+		// On little-endian systems, this is stored in memory as: [a, b, g, r]
+		// We need to convert to: [r, g, b, a] for Photoshop
+		
+		unsigned int bufferSize = ps.formatRecord->rowBytes * texLoadInfo.header->image_height;
 		Ptr pixelData = sPSBuffer->New(&bufferSize, bufferSize);
 		if (pixelData == NULL)
 		{
@@ -3106,8 +3009,32 @@ void IntelPlugin::DoReadContinue()
 			return;
 		}
 
-		// Copy decompressed data to Photoshop buffer
-		memcpy(pixelData, imageData.get(), bufferSize);
+
+		// Copy pixel data respecting Photoshop's format
+		unsigned8* dstData = reinterpret_cast<unsigned8*>(pixelData);
+		
+		for (size_t y = 0; y < texLoadInfo.header->image_height; ++y)
+		{
+			for (size_t x = 0; x < texLoadInfo.header->image_width; ++x)
+			{
+				size_t srcIdx = y * texLoadInfo.header->image_width + x;
+				unsigned long rgba = imageData[srcIdx];
+				
+				// Extract RGBA from packed format
+				unsigned char r = (rgba >> 24) & 0xFF;
+				unsigned char g = (rgba >> 16) & 0xFF;
+				unsigned char b = (rgba >> 8) & 0xFF;
+				unsigned char a = rgba & 0xFF;
+
+				// Write to Photoshop buffer in RGBA order
+				size_t dstIdx = y * ps.formatRecord->rowBytes + x * ps.formatRecord->colBytes;
+				dstData[dstIdx + 0] = r;
+				dstData[dstIdx + 1] = g;
+				dstData[dstIdx + 2] = b;
+				dstData[dstIdx + 3] = a;
+			}
+		}
+
 
 		// Assign buffer to Photoshop
 		ps.formatRecord->data = pixelData;
@@ -3118,9 +3045,9 @@ void IntelPlugin::DoReadContinue()
 		// Cleanup
 		ps.formatRecord->data = NULL;
 		sPSBuffer->Dispose(&pixelData);
+		
 	}
 	else {
-		DebugLog("DoReadStart: Not a TEX file, treating as DDS");
 		//Allocate buffer for ->data field
 		//seems we have to allocate for ourselves here because we set maxData to 0
 		uint32 bufferSize = (ps.formatRecord->theRect.bottom - ps.formatRecord->theRect.top) * ps.formatRecord->rowBytes;
@@ -3367,7 +3294,6 @@ void IntelPlugin::PluginMain(const int16 selector,
 	//	Store persistent data
 	//---------------------------------------------------------------------------
 
-	DebugLog("PluginMain: Called with selector: %d", selector);
 	
 	ps.formatRecord = formatRecord;
 	ps.pluginRef = reinterpret_cast<SPPluginRef>(formatRecord->plugInRef);
@@ -3384,14 +3310,12 @@ void IntelPlugin::PluginMain(const int16 selector,
 	//---------------------------------------------------------------------------
 	if (selector == formatSelectorAbout)
 	{
-		DebugLog("PluginMain: About box requested");
 		AboutRecordPtr aboutRecord = reinterpret_cast<AboutRecordPtr>(formatRecord);
 		sSPBasic = aboutRecord->sSPBasic;
 		ShowAboutIntel(aboutRecord);
 	}
 	else
 	{ // do the rest of the process as normal:
-		DebugLog("PluginMain: Processing selector: %d", selector);
 
 		sSPBasic = ps.formatRecord->sSPBasic;
 
@@ -3436,7 +3360,6 @@ void IntelPlugin::PluginMain(const int16 selector,
 				DoReadPrepare();
 				break;
 			case formatSelectorReadStart:
-				DebugLog("PluginMain: formatSelectorReadStart called");
 				DoReadStart();
 				break;
 			case formatSelectorReadContinue:
@@ -3492,7 +3415,6 @@ void IntelPlugin::PluginMain(const int16 selector,
 				break;
 
 			case formatSelectorReadLayerStart:
-				DebugLog("PluginMain: formatSelectorReadLayerStart called");
 				DoReadLayerStart();
 			break;
 			case formatSelectorReadLayerContinue:
@@ -3536,28 +3458,10 @@ void IntelPlugin::PluginMain(const int16 selector,
 
 
 DLLExport MACPASCAL void PluginMain (const int16 selector,
-						             FormatRecordPtr formatRecord,
-						             intptr_t * data,
-						             int16 * result)
+					             FormatRecordPtr formatRecord,
+					             intptr_t * data,
+					             int16 * result)
 {
-	// Log immediately when PluginMain is called - this proves Photoshop loaded the plugin
-	char logPath[MAX_PATH];
-	if (SHGetFolderPathA(NULL, CSIDL_DESKTOP, NULL, SHGFP_TYPE_CURRENT, logPath) == S_OK)
-	{
-		strcat_s(logPath, "\\IntelTextureWorks_debug.log");
-		HANDLE hFile = CreateFileA(logPath, GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-		if (hFile != INVALID_HANDLE_VALUE)
-		{
-			SetFilePointer(hFile, 0, NULL, FILE_END);
-			char msg[256];
-			sprintf_s(msg, "PluginMain called! Selector: %d\r\n", selector);
-			DWORD written = 0;
-			WriteFile(hFile, msg, (DWORD)strlen(msg), &written, NULL);
-			CloseHandle(hFile);
-		}
-	}
-	OutputDebugStringA("IntelTextureWorks: PluginMain called!\n");
-	
 	try 
 	{ 
 		IntelPlugin::GetInstance().PluginMain(selector, formatRecord, data, result);

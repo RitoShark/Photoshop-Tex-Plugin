@@ -312,7 +312,8 @@ public:
 	void FillFromCompositedLayers();
 
 	//Does the image loaded have alpha, ist it specified to have alpha
-	bool HasAlpha() { return (ps.formatRecord->planes > 3) && (ps.data->TextureTypeIndex==TextureTypeEnum::COLOR_ALPHA);}
+	// For TEX files, always check for alpha channel (since we force DXT5 which supports alpha)
+	bool HasAlpha() { return (ps.formatRecord->planes > 3); }
 	
 	//Show hide wait cursor
 	void showLoadingCursor();
