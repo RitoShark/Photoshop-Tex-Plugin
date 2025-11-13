@@ -1,3 +1,5 @@
+originally made and edited by guisai, finished by frog
+
 # Photoshop TEX Plugin
 
 A Photoshop plugin for loading and saving League of Legends `.tex` texture files with DXT5 compression.
@@ -188,7 +190,7 @@ Contributions are welcome! Please feel free to submit pull requests or open issu
 ---
 
 ## 🎮 Credits
-
+- **GUISAI** https://github.com/GuiSaiUwU
 - **Original Intel Texture Works Plugin** - Intel Corporation (Discontinued)
 - **TEX format support** - RitoShark
 - **DirectXTex** - Microsoft Corporation
