@@ -1,3 +1,6 @@
+# https://github.com/RitoShark/TexThumbnailProvider 
+## INSTALL GUISAIS TEX THUMBNAIL PROVIDER FOR THE FILE EXPLORER
+
 originally made and edited by guisai, finished by frog
 
 # Photoshop TEX Plugin
