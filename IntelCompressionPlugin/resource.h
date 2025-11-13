@@ -2,6 +2,10 @@
 // Microsoft Visual C++ generated include file.
 // Used by IntelPlugin.rc
 //
+#ifndef IDC_STATIC
+#define IDC_STATIC (-1)
+#endif
+
 #define IDC_PRESETDELETE_BUTTON         3
 #define IDC_COMPRESSION_HELP            4
 #define IDC_COMPRESSION_COMBO           6
@@ -46,6 +50,7 @@
 #define IDD_GETNAME                     109
 #define IDD_PREVIEW                     110
 #define IDD_LOADDIALOG                  111
+#define IDD_COMPRESSIONDIALOG           112
 #define IDC_BUTTON1                     1001
 #define IDC_COMBO1                      1003
 #define IDC_EDIT1                       1005
@@ -55,6 +60,10 @@
 #define IDC_LOADDIALOG_ALPHAGROUP       1008
 #define IDC_LOADDIALOG_ALPHACHECK       1009
 #define IDC_LOADDIALOG_MIPMAPGROUP      1010
+#define IDC_RADIO_DXT5                  1011
+#define IDC_RADIO_DXT1                  1012
+#define IDC_RADIO_BGRA8                 1013
+#define IDC_CHECK_REMEMBER              1014
 #define IDD_MAINDIALOG                  16001
 #define IDD_ABOUT                       28950
 
@@ -63,9 +72,9 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
-#define _APS_NEXT_RESOURCE_VALUE        112
+#define _APS_NEXT_RESOURCE_VALUE        113
 #define _APS_NEXT_COMMAND_VALUE         40001
-#define _APS_NEXT_CONTROL_VALUE         1010
+#define _APS_NEXT_CONTROL_VALUE         1015
 #define _APS_NEXT_SYMED_VALUE           121
 #endif
 #endif

@@ -16,6 +16,7 @@
 #include "IntelPlugin.h"
 #include "IntelPluginUIWin.h"
 #include "SaveOptionsDialog.h"
+#include "CompressionDialog.h"
 #include <memory>
 #include <sstream>
 #include <windows.h>
@@ -194,7 +195,14 @@ bool IntelPlugin::CompressToScratchImage(ScratchImage **scrImageScratch_, Scratc
 	//Compress image, section
 	//For TEX files, use DirectXTex compression for BC3/DXT5 to ensure compatibility
 	//ISPC is used for BC1,3,6,7. BC4,5 is done using DirectXTex Lib in one of the previous sections
-	if (ps.data->encoding_g == DXGI_FORMAT_BC3_UNORM || ps.data->encoding_g == DXGI_FORMAT_BC3_UNORM_SRGB)
+	if (ps.data->encoding_g == DXGI_FORMAT_R8G8B8A8_UNORM)
+	{
+		// BGRA8: No compression, just swap pointers
+		delete *scrImageScratch_;
+		*scrImageScratch_ = *scrUncompressedImageScratch_;
+		*scrUncompressedImageScratch_ = NULL;
+	}
+	else if (ps.data->encoding_g == DXGI_FORMAT_BC3_UNORM || ps.data->encoding_g == DXGI_FORMAT_BC3_UNORM_SRGB)
 	{
 		// Use DirectXTex for BC3/DXT5 compression for TEX files (better compatibility)
 		HRESULT hr = Compress((*scrUncompressedImageScratch_)->GetImages(), (*scrUncompressedImageScratch_)->GetImageCount(), 
@@ -206,7 +214,19 @@ bool IntelPlugin::CompressToScratchImage(ScratchImage **scrImageScratch_, Scratc
 			return false;
 		}
 	}
-	else if (ps.data->encoding_g != DXGI_FORMAT_BC4_UNORM && ps.data->encoding_g != DXGI_FORMAT_BC5_UNORM && ps.data->encoding_g !=DXGI_FORMAT_R8G8B8A8_UNORM)
+	else if (ps.data->encoding_g == DXGI_FORMAT_BC1_UNORM || ps.data->encoding_g == DXGI_FORMAT_BC1_UNORM_SRGB)
+	{
+		// Use DirectXTex for BC1/DXT1 compression for TEX files (better compatibility)
+		HRESULT hr = Compress((*scrUncompressedImageScratch_)->GetImages(), (*scrUncompressedImageScratch_)->GetImageCount(), 
+			                  (*scrUncompressedImageScratch_)->GetMetadata(), ps.data->encoding_g, 
+			                  TEX_COMPRESS_DEFAULT, 0.5f, **scrImageScratch_);
+		if (hr != S_OK)
+		{
+			UserError("Could not compress to DXT1/BC1");
+			return false;
+		}
+	}
+	else if (ps.data->encoding_g != DXGI_FORMAT_BC4_UNORM && ps.data->encoding_g != DXGI_FORMAT_BC5_UNORM)
 	{
 		//How many mip levels are generated? If no mip map override this is 1 so that only one image is encoded
 		size_t mipLevels = (*scrUncompressedImageScratch_)->GetMetadata().mipLevels;
@@ -1918,9 +1938,9 @@ void IntelPlugin::DoWriteStart()
 {
 	InitData();
 	
-	/* SKIP DIALOG - Always use DXT5 compression for TEX files */
+	// Show simple compression format selection dialog
 	ps.data->queryForParameters = false;
-	ps.data->encoding_g = DXGI_FORMAT_BC3_UNORM; // Force DXT5
+	ps.data->encoding_g = DXGI_FORMAT_BC3_UNORM; // Default to DXT5
 	
 	//If Multithreading init win32 threads and events
 	if (ps.data->gMultithreaded)
@@ -1928,9 +1948,9 @@ void IntelPlugin::DoWriteStart()
 		InitWin32Threads();
 	}
 
-	// SKIP DIALOG - Save directly with DXT5
-	// if (OptionsDialog::DoModal(this) != IDOK) 
-	// 	SetResult(userCanceledErr);
+	// Show lightweight compression selection dialog
+	if (CompressionDialog::DoModal(this) != IDOK) 
+		SetResult(userCanceledErr);
 
 	if (GetResult() == noErr)
 	{
@@ -2088,22 +2108,33 @@ void IntelPlugin::DoWriteDDS()
 		return;
 
 	// Validate dimensions for DXT compression (must be divisible by 4)
+	// Note: BGRA8 format doesn't need this restriction as it's uncompressed
 	int imageWidth = ps.formatRecord->imageSize.h;
 	int imageHeight = ps.formatRecord->imageSize.v;
 	
-	if (imageWidth % 4 != 0 || imageHeight % 4 != 0)
+	// Check if using DXT compression (BC1/BC3) - dimensions must be divisible by 4
+	bool isDXTCompression = (ps.data->encoding_g == DXGI_FORMAT_BC3_UNORM || 
+	                         ps.data->encoding_g == DXGI_FORMAT_BC3_UNORM_SRGB ||
+	                         ps.data->encoding_g == DXGI_FORMAT_BC1_UNORM ||
+	                         ps.data->encoding_g == DXGI_FORMAT_BC1_UNORM_SRGB);
+	
+	if (isDXTCompression && (imageWidth % 4 != 0 || imageHeight % 4 != 0))
 	{
 		char errorMsg[512];
 		int suggestedWidth = ((imageWidth + 3) / 4) * 4;
 		int suggestedHeight = ((imageHeight + 3) / 4) * 4;
 		
+		const char* formatName = (ps.data->encoding_g == DXGI_FORMAT_BC1_UNORM || 
+		                          ps.data->encoding_g == DXGI_FORMAT_BC1_UNORM_SRGB) ? "DXT1" : "DXT5";
+		
 		sprintf_s(errorMsg, 
-			"Image dimensions must be divisible by 4 for TEX format.\n\n"
+			"Image dimensions must be divisible by 4 for %s compression.\n\n"
 			"Current size: %dx%d\n"
 			"Suggested size: %dx%d\n\n"
-			"Please resize your image to dimensions divisible by 4.\n"
+			"Please resize your image to dimensions divisible by 4,\n"
+			"or use Uncompressed (BGRA8) format for any dimensions.\n"
 			"Examples: 1024x1024, 2048x2048, 512x256, 4096x4096, etc.",
-			imageWidth, imageHeight, suggestedWidth, suggestedHeight);
+			formatName, imageWidth, imageHeight, suggestedWidth, suggestedHeight);
 		
 		UserError(errorMsg);
 		return;
@@ -2220,19 +2251,41 @@ void IntelPlugin::DoWriteDDS()
 	const Image* img = scrImageScratch->GetImages();
 	const TexMetadata& metadata = scrImageScratch->GetMetadata();
 	
-	// Verify DXT5/BC3 compression was applied
-	if (metadata.format != DXGI_FORMAT_BC3_UNORM && metadata.format != DXGI_FORMAT_BC3_UNORM_SRGB)
+	// Determine TEX format based on compression
+	tex_format_export texFormat;
+	size_t expectedSize;
+	bool needsRGBAtoBGRAConversion = false;
+	
+	if (metadata.format == DXGI_FORMAT_BC3_UNORM || metadata.format == DXGI_FORMAT_BC3_UNORM_SRGB)
 	{
-		UserError("Compression failed - image is not in DXT5 format");
+		// DXT5
+		texFormat = tex_format_export_dxt5;
+		size_t blockWidth = (metadata.width + 3) / 4;
+		size_t blockHeight = (metadata.height + 3) / 4;
+		expectedSize = blockWidth * blockHeight * 16;  // DXT5 = 16 bytes per 4x4 block
+	}
+	else if (metadata.format == DXGI_FORMAT_BC1_UNORM || metadata.format == DXGI_FORMAT_BC1_UNORM_SRGB)
+	{
+		// DXT1
+		texFormat = tex_format_export_dxt1;
+		size_t blockWidth = (metadata.width + 3) / 4;
+		size_t blockHeight = (metadata.height + 3) / 4;
+		expectedSize = blockWidth * blockHeight * 8;   // DXT1 = 8 bytes per 4x4 block
+	}
+	else if (metadata.format == DXGI_FORMAT_R8G8B8A8_UNORM)
+	{
+		// BGRA8 (uncompressed)
+		texFormat = tex_format_export_bgra8;
+		expectedSize = metadata.width * metadata.height * 4;  // 4 bytes per pixel
+		needsRGBAtoBGRAConversion = true;
+	}
+	else
+	{
+		UserError("Unsupported format for TEX export");
 		return;
 	}
 	
-	// Calculate expected DXT5 data size
-	size_t blockWidth = (metadata.width + 3) / 4;
-	size_t blockHeight = (metadata.height + 3) / 4;
-	size_t expectedSize = blockWidth * blockHeight * 16;  // DXT5 = 16 bytes per 4x4 block
-	
-	// Verify the data size matches expected DXT5 size
+	// Verify the data size
 	if (img->slicePitch != expectedSize)
 	{
 		char errorMsg[256];
@@ -2251,7 +2304,7 @@ void IntelPlugin::DoWriteDDS()
 	texHeader.image_width = (uint16_t)metadata.width;
 	texHeader.image_height = (uint16_t)metadata.height;
 	texHeader.unk1 = 1;
-	texHeader.tex_format = tex_format_export_dxt5;  // Always DXT5
+	texHeader.tex_format = texFormat;
 	texHeader.unk2 = 0;
 	texHeader.has_mipmaps = false;  // No mipmaps for now
 	
@@ -2264,17 +2317,44 @@ void IntelPlugin::DoWriteDDS()
 	}
 	else
 	{
-		
-		// Write compressed pixel data
 		size_t dataSize = img->slicePitch;
 		
-		if (!WriteFile(reinterpret_cast<HANDLE>(ps.formatRecord->dataFork), img->pixels, (DWORD)dataSize, &written, NULL))
+		if (needsRGBAtoBGRAConversion)
 		{
-			SetResult(writErr);
+			// Convert RGBA to BGRA for BGRA8 format
+			std::unique_ptr<uint8_t[]> bgra8Data(new uint8_t[dataSize]);
+			const uint8_t* src = img->pixels;
+			uint8_t* dst = bgra8Data.get();
+			
+			for (size_t i = 0; i < metadata.width * metadata.height; i++)
+			{
+				dst[i * 4 + 0] = src[i * 4 + 2];  // B
+				dst[i * 4 + 1] = src[i * 4 + 1];  // G
+				dst[i * 4 + 2] = src[i * 4 + 0];  // R
+				dst[i * 4 + 3] = src[i * 4 + 3];  // A
+			}
+			
+			// Write BGRA8 pixel data
+			if (!WriteFile(reinterpret_cast<HANDLE>(ps.formatRecord->dataFork), bgra8Data.get(), (DWORD)dataSize, &written, NULL))
+			{
+				SetResult(writErr);
+			}
+			else if (written < dataSize)
+			{
+				SetResult(dskFulErr);
+			}
 		}
-		else if (written < dataSize)
+		else
 		{
-			SetResult(dskFulErr);
+			// Write compressed pixel data (DXT1/DXT5)
+			if (!WriteFile(reinterpret_cast<HANDLE>(ps.formatRecord->dataFork), img->pixels, (DWORD)dataSize, &written, NULL))
+			{
+				SetResult(writErr);
+			}
+			else if (written < dataSize)
+			{
+				SetResult(dskFulErr);
+			}
 		}
 	}
 	
@@ -2658,10 +2738,24 @@ void IntelPlugin::DoReadStart()
 		UINT stride = width * 4;
 		UINT imageSize = stride * height;
 
-		uint32 blockSize = (header->tex_format == tex_format_dxt5) ? 16 : 8;
-		uint32 blockWidth = (header->image_width + 3) / 4;
-		uint32 blockHeight = (header->image_height + 3) / 4;
-		int32 readCount = blockWidth * blockHeight * blockSize;
+		int32 readCount;
+		uint32 blockSize;
+		uint32 blockWidth;
+		uint32 blockHeight;
+		
+		if (header->tex_format == tex_format_bgra8) {
+			// BGRA8 is uncompressed: 4 bytes per pixel
+			readCount = width * height * 4;
+			blockSize = 4;
+			blockWidth = width;
+			blockHeight = height;
+		} else {
+			// DXT1/DXT5 compressed: calculate block sizes
+			blockSize = (header->tex_format == tex_format_dxt5) ? 16 : 8;
+			blockWidth = (header->image_width + 3) / 4;
+			blockHeight = (header->image_height + 3) / 4;
+			readCount = blockWidth * blockHeight * blockSize;
+		}
 
 
 		auto pixelData = std::make_unique<uint8[]>(readCount);
@@ -2678,15 +2772,26 @@ void IntelPlugin::DoReadStart()
 			unsigned int mipMapCount = get_num_mipmaps(header->image_width, header->image_height);
 
 			UINT skip = 0;
-			// block_size = 4 for dxt5 and dxt1
-			// Note (+ block_size - 1) simplified to +3 bcs 4 - 1
-			for (auto x = mipMapCount; x > 0; x--) {
-				auto curr_width = max(header->image_width / (1 << x), 1);
-				auto curr_height = max(header->image_height / (1 << x), 1);
+			
+			if (header->tex_format == tex_format_bgra8) {
+				// BGRA8: skip all smaller mipmaps (4 bytes per pixel)
+				for (auto x = mipMapCount; x > 0; x--) {
+					auto curr_width = max(header->image_width / (1 << x), 1);
+					auto curr_height = max(header->image_height / (1 << x), 1);
+					skip += curr_width * curr_height * 4;
+				}
+			} else {
+				// DXT1/DXT5: skip all smaller mipmaps (block compressed)
+				// block_size = 4 for dxt5 and dxt1
+				// Note (+ block_size - 1) simplified to +3 bcs 4 - 1
+				for (auto x = mipMapCount; x > 0; x--) {
+					auto curr_width = max(header->image_width / (1 << x), 1);
+					auto curr_height = max(header->image_height / (1 << x), 1);
 
-				auto blockWidth = (curr_width + 3) / 4;
-				auto blockHeight = (curr_height + 3) / 4;
-				skip += blockSize * blockWidth * blockHeight;
+					auto mipBlockWidth = (curr_width + 3) / 4;
+					auto mipBlockHeight = (curr_height + 3) / 4;
+					skip += blockSize * mipBlockWidth * mipBlockHeight;
+				}
 			}
 
 			err = PSSDKSetFPos(ps.formatRecord->dataFork, fsFromStart, sizeof(TEX_HEADER) + skip);
@@ -2965,14 +3070,11 @@ void IntelPlugin::DoReadContinue()
 	if (texLoadInfo.isLoadingTex) {
 		texLoadInfo.currentLayer++;
 
+		const UINT width = texLoadInfo.header->image_width;
+		const UINT height = texLoadInfo.header->image_height;
+		const UINT stride = width * 4;
 
-		const UINT blockSize = texLoadInfo.header->tex_format == tex_format_dxt5 ? 16 : 8;
-		const UINT blockWidth = (texLoadInfo.header->image_width + 3) / 4;
-		const UINT blockHeight = (texLoadInfo.header->image_height + 3) / 4;
-		const UINT dataSize = blockWidth * blockHeight * blockSize;
-		const UINT stride = texLoadInfo.header->image_width * 4;
-
-		auto imageData = std::make_unique<unsigned long[]>(stride * texLoadInfo.header->image_height);
+		auto imageData = std::make_unique<unsigned long[]>(stride * height);
 		if (!imageData)
 		{
 			errorMessage(LINE_STRING, "Err");
@@ -2986,13 +3088,24 @@ void IntelPlugin::DoReadContinue()
 			return;
 		}
 
-
 		if (texLoadInfo.header->tex_format == tex_format_dxt5) {
-			BlockDecompressImageDXT5(texLoadInfo.header->image_width, texLoadInfo.header->image_height, texLoadInfo.pixelData.get(), imageData.get());
+			BlockDecompressImageDXT5(width, height, texLoadInfo.pixelData.get(), imageData.get());
 		}
 		else if (texLoadInfo.header->tex_format == tex_format_dxt1) {
-			BlockDecompressImageDXT1(texLoadInfo.header->image_width, texLoadInfo.header->image_height, texLoadInfo.pixelData.get(), imageData.get());
-		} // No need for decompress rgba8
+			BlockDecompressImageDXT1(width, height, texLoadInfo.pixelData.get(), imageData.get());
+		}
+		else if (texLoadInfo.header->tex_format == tex_format_bgra8) {
+			// BGRA8 is already uncompressed, just copy and convert BGRA -> RGBA
+			uint8_t* src = texLoadInfo.pixelData.get();
+			unsigned long* dst = imageData.get();
+			for (UINT i = 0; i < width * height; i++) {
+				uint8_t b = src[i * 4 + 0];
+				uint8_t g = src[i * 4 + 1];
+				uint8_t r = src[i * 4 + 2];
+				uint8_t a = src[i * 4 + 3];
+				dst[i] = PackRGBA(r, g, b, a);
+			}
+		}
 
 
 		// Convert from packed RGBA (big-endian 32-bit) to byte array RGBA format for Photoshop

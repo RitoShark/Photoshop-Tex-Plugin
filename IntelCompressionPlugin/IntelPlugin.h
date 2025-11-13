@@ -139,6 +139,8 @@ enum CompressionTypeEnum
 
 class IntelPlugin
 {
+	friend class CompressionDialog;
+	
 public:
 
 	// This is our structure that we use to pass globals between routines:

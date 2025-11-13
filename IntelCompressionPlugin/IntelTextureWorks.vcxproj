@@ -322,6 +322,7 @@ exit 1
     <ClCompile Include="..\3rdParty\Intel\Source\win32Threads.cpp" />
     <ClCompile Include="s3tc.cpp" />
     <ClCompile Include="SaveOptionsDialog.cpp" />
+    <ClCompile Include="CompressionDialog.cpp" />
     <ClCompile Include="IntelPlugin.cpp" />
     <ClCompile Include="IntelPluginUIWin.cpp">
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Disabled</Optimization>
@@ -344,6 +345,7 @@ exit 1
     <ClInclude Include="..\3rdParty\Intel\Source\ispc_texcomp.h" />
     <ClInclude Include="s3tc.h" />
     <ClInclude Include="SaveOptionsDialog.h" />
+    <ClInclude Include="CompressionDialog.h" />
     <ClInclude Include="..\3rdParty\Intel\Source\win32Threads.h" />
     <ClInclude Include="IntelPlugin.h" />
     <ClInclude Include="IntelPluginUIWin.h" />
