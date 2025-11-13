@@ -1,0 +1,74 @@
+# Visual Studio
+.vs/
+*.cache
+*.log
+*.suo
+*.sdf
+*.opensdf
+*.pdb
+*.user
+*.tmp_proj
+*.bsc
+*.ilk
+*.vcxproj.user
+*.VC.db
+*.ipch
+*.sln.docstates
+
+# Build artifacts
+Debug/
+Release/
+x64/Release/
+x64/Debug/
+Win32/
+bin/
+obj/
+ipch/
+*.obj
+*.pch
+*.idb
+*.lastbuildstate
+*.tlog
+*.exp
+*.lib
+*.unsuccessfulbuild
+*.sbr
+
+# Intel compiler generated
+*_ispc*.h
+
+# Resource compiled files
+*.pipl
+
+# Adobe Photoshop SDK (NOT REDISTRIBUTABLE - users must download separately)
+pluginsdk/
+adobe_photoshop_cs6_sdk_win/
+adobe_photoshop_cs6_sdk_win.zip
+connectionsdk/
+images/
+ReadMe.html
+license.html
+
+# Backup and restore folders
+restore/
+originl/
+tex plugin photoshop/
+TexPluginPhotoshop/
+PaintDotNet_TEX_Plugin/
+
+# Sample files
+*.dds
+*.tex
+Sample Images/
+
+# Misc
+*.DS_Store
+*.aps
+*.zip
+*.tmp
+*.temp
+copy_plugin.bat
+
+# Keep essential outputs
+!Plugins/x64/TexPlugin.8bi
+!3rdParty/DirectXTex/DirectXTex/Bin/Desktop_2012/x64/Release/DirectXTex.lib
