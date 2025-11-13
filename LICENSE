@@ -1,8 +1,9 @@
-# License Information
-
-## This Project (TEX Plugin Modifications)
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
 
 Copyright (c) 2025 RitoShark
+Copyright (c) 2017 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,50 +19,40 @@ limitations under the License.
 
 ---
 
-## Intel® Texture Works Plugin (Original Base)
+## Attribution
 
-This project is a fork/modification of Intel® Texture Works Plugin for Photoshop,
-which was released under the Apache License 2.0.
+This project is a fork/modification of Intel® Texture Works Plugin for Photoshop.
 
-Original project: https://github.com/GameTechDev/Intel-Texture-Works-Plugin
-Copyright (c) 2017 Intel Corporation
+**Original Project:**
+- Intel® Texture Works Plugin for Photoshop
+- Copyright (c) 2017 Intel Corporation
+- Original repository: https://github.com/GameTechDev/Intel-Texture-Works-Plugin
+- License: Apache License 2.0
+- **Note: Intel has discontinued this project and no longer maintains it.**
 
-**Note: Intel has discontinued this project and no longer maintains it.**
+**Modifications:**
+- TEX file format support added by RitoShark (2025)
+- Copyright (c) 2025 RitoShark
+- Licensed under Apache License 2.0
 
 ---
 
 ## Third-Party Components
 
 ### DirectXTex Library
-
 Copyright (c) 2015 Microsoft Corp
-
-Licensed under the MIT License:
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this
-software and associated documentation files (the "Software"), to deal in the Software
-without restriction, including without limitation the rights to use, copy, modify,
-merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice shall be included in all copies
-or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
-INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
-CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
-OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-Source: https://github.com/Microsoft/DirectXTex
+Licensed under the MIT License (see LICENSE-MIT.txt or 3rdParty/DirectXTex/MIT.txt)
 
 ### Intel ISPC Texture Compressor
-
 Copyright (c) 2017 Intel Corporation
+Licensed under the Apache License 2.0 (this file)
 
-Licensed under the Apache License 2.0 (see root LICENSE file for full text)
+---
+
+## Full License Text
+
+For the complete Apache License 2.0 terms and conditions, see LICENSE-APACHE-2.0.txt
+or license.txt in this repository.
 
 ---
 
@@ -73,11 +64,6 @@ This project requires the Adobe Photoshop CS6 SDK to build, which must be downlo
 separately from Adobe. The SDK is subject to Adobe's own licensing terms and is NOT
 redistributed in this repository.
 
-To build this plugin, you must:
-1. Download the Adobe Photoshop CS6 SDK from Adobe
-2. Accept Adobe's license terms
-3. Follow the build instructions in README.md
-
 The compiled plugin (.8bi file) may contain code from the Adobe SDK and is subject
 to Adobe's SDK licensing terms.
 
@@ -88,4 +74,3 @@ to Adobe's SDK licensing terms.
 This plugin supports the TEX file format used by League of Legends. League of Legends
 and Riot Games are trademarks of Riot Games, Inc. This project is not affiliated with,
 endorsed by, or sponsored by Riot Games, Inc.
-

@@ -49,6 +49,11 @@ images/
 ReadMe.html
 license.html
 
+# Keep license files
+!license.txt
+!LICENSE-APACHE-2.0.txt
+!LICENSE-MIT.txt
+
 # Backup and restore folders
 restore/
 originl/
